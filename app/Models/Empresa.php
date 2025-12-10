@@ -32,6 +32,12 @@ class Empresa extends Model
         return $this->belongsTo(Usuario::class, 'revisado_por');
     }
 
+     // ✅ AGREGAR: RELACIÓN CON SERVICIOS SOCIALES
+    public function serviciosSociales()
+    {
+        return $this->hasMany(ServicioSocial::class, 'empresa_id');
+    }
+
     // ✅ NUEVA RELACIÓN CON VACANTES
     public function vacantes()
     {

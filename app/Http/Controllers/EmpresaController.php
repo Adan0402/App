@@ -14,12 +14,14 @@ use Illuminate\Support\Facades\Hash;
 
 class EmpresaController extends Controller
 {
-    /**
-     * Mostrar formulario para completar datos de empresa
-     */
+    public function __construct()
+    {
+        // Rate limiting para prevenir spam
+        $this->middleware('throttle:5,1')->only(['store', 'subirLogo', 'subirConstanciaFiscal']);
+    }
+    
     public function create()
     {
-        // Verificar que el usuario es una empresa y no tiene datos aún
         if (Auth::user()->tipo !== 'empresa') {
             return redirect('/dashboard')->with('error', 'Solo las empresas pueden acceder a esta página');
         }
@@ -31,17 +33,12 @@ class EmpresaController extends Controller
         return view('empresas.create');
     }
 
-    /**
-     * Guardar datos de la empresa
-     */
     public function store(Request $request)
     {
-        // Validar que el usuario es una empresa
         if (Auth::user()->tipo !== 'empresa') {
             return redirect('/dashboard')->with('error', 'Acceso no autorizado');
         }
 
-        // Validar datos
         $request->validate([
             'nombre_empresa' => 'required|string|max:255',
             'tipo_negocio' => 'required|string|max:100',
@@ -56,36 +53,34 @@ class EmpresaController extends Controller
             'descripcion_empresa' => 'nullable|string|max:1000',
         ]);
 
-        // Crear la empresa
+        // SANITIZAR TODOS LOS CAMPOS DE TEXTO
         $empresa = Empresa::create([
             'user_id' => Auth::id(),
-            'nombre_empresa' => $request->nombre_empresa,
-            'tipo_negocio' => $request->tipo_negocio,
+            'nombre_empresa' => strip_tags($request->nombre_empresa),
+            'tipo_negocio' => strip_tags($request->tipo_negocio),
             'tamano_empresa' => $request->tamano_empresa,
-            'rfc' => $request->rfc,
-            'direccion' => $request->direccion,
-            'telefono_contacto' => $request->telefono_contacto,
+            'rfc' => $request->rfc ? strip_tags($request->rfc) : null,
+            'direccion' => $request->direccion ? strip_tags($request->direccion) : null,
+            'telefono_contacto' => strip_tags($request->telefono_contacto),
             'correo_contacto' => $request->correo_contacto,
-            'representante_legal' => $request->representante_legal,
-            'puesto_representante' => $request->puesto_representante,
-            'pagina_web' => $request->pagina_web,
-            'descripcion_empresa' => $request->descripcion_empresa,
+            'representante_legal' => strip_tags($request->representante_legal),
+            'puesto_representante' => strip_tags($request->puesto_representante),
+            'pagina_web' => $this->sanitizeUrl($request->pagina_web),
+            'descripcion_empresa' => $request->descripcion_empresa ? strip_tags($request->descripcion_empresa) : null,
             'estado' => 'pendiente',
         ]);
 
-        // ✅ NOTIFICACIÓN DIRECTA Y SIMPLE
+        // NOTIFICACIONES SEGURAS
         $admins = Usuario::where('tipo', 'admin')->get();
-
-        // Agregar log para ver qué está pasando
-        \Log::info("🔔 EMPRESA CREADA: {$empresa->nombre_empresa}");
-        \Log::info("🔔 ADMINS ENCONTRADOS: " . $admins->count());
 
         foreach ($admins as $admin) {
             try {
-                $notificacion = Notificacion::create([
+                $nombreEmpresaSeguro = htmlspecialchars($empresa->nombre_empresa, ENT_QUOTES, 'UTF-8');
+                
+                Notificacion::create([
                     'user_id' => $admin->id,
                     'titulo' => '🏢 Nueva Empresa Registrada',
-                    'mensaje' => "La empresa '{$empresa->nombre_empresa}' se ha registrado y está pendiente de validación.",
+                    'mensaje' => "La empresa '{$nombreEmpresaSeguro}' se ha registrado y está pendiente de validación.",
                     'tipo' => 'empresa_pendiente',
                     'data' => [
                         'empresa_id' => $empresa->id,
@@ -93,19 +88,14 @@ class EmpresaController extends Controller
                     ]
                 ]);
                 
-                \Log::info("✅ NOTIFICACIÓN CREADA para admin: {$admin->name} (ID: {$notificacion->id})");
-                
             } catch (\Exception $e) {
-                \Log::error("❌ ERROR creando notificación: " . $e->getMessage());
+                \Log::error("Error creando notificación: " . $e->getMessage());
             }
         }
 
         return redirect('/dashboard')->with('success', 'Datos de empresa guardados. Están pendientes de aprobación por el ITSZN.');
     }
 
-    /**
-     * Mostrar perfil de la empresa
-     */
     public function perfil()
     {
         $user = Auth::user();
@@ -120,9 +110,6 @@ class EmpresaController extends Controller
         ]);
     }
 
-    /**
-     * Actualizar información general de la empresa
-     */
     public function actualizarInformacionGeneral(Request $request)
     {
         $user = Auth::user();
@@ -141,11 +128,11 @@ class EmpresaController extends Controller
 
         try {
             $user->empresa->update([
-                'nombre_empresa' => $request->nombre_empresa,
-                'tipo_negocio' => $request->tipo_negocio,
+                'nombre_empresa' => strip_tags($request->nombre_empresa),
+                'tipo_negocio' => strip_tags($request->tipo_negocio),
                 'tamano_empresa' => $request->tamano_empresa,
-                'rfc' => $request->rfc,
-                'descripcion_empresa' => $request->descripcion_empresa,
+                'rfc' => $request->rfc ? strip_tags($request->rfc) : null,
+                'descripcion_empresa' => $request->descripcion_empresa ? strip_tags($request->descripcion_empresa) : null,
             ]);
 
             return response()->json([
@@ -160,9 +147,6 @@ class EmpresaController extends Controller
         }
     }
 
-    /**
-     * Actualizar información de contacto
-     */
     public function actualizarContacto(Request $request)
     {
         $user = Auth::user();
@@ -180,9 +164,9 @@ class EmpresaController extends Controller
 
         try {
             $user->empresa->update([
-                'direccion' => $request->direccion,
-                'pagina_web' => $request->pagina_web,
-                'telefono_contacto' => $request->telefono_contacto,
+                'direccion' => $request->direccion ? strip_tags($request->direccion) : null,
+                'pagina_web' => $this->sanitizeUrl($request->pagina_web),
+                'telefono_contacto' => strip_tags($request->telefono_contacto),
                 'correo_contacto' => $request->correo_contacto,
             ]);
 
@@ -198,9 +182,6 @@ class EmpresaController extends Controller
         }
     }
 
-    /**
-     * Actualizar representante legal
-     */
     public function actualizarRepresentante(Request $request)
     {
         $user = Auth::user();
@@ -216,8 +197,8 @@ class EmpresaController extends Controller
 
         try {
             $user->empresa->update([
-                'representante_legal' => $request->representante_legal,
-                'puesto_representante' => $request->puesto_representante,
+                'representante_legal' => strip_tags($request->representante_legal),
+                'puesto_representante' => strip_tags($request->puesto_representante),
             ]);
 
             return response()->json([
@@ -232,9 +213,6 @@ class EmpresaController extends Controller
         }
     }
 
-    /**
-     * Subir/actualizar logo de la empresa
-     */
     public function subirLogo(Request $request)
     {
         $user = Auth::user();
@@ -244,16 +222,14 @@ class EmpresaController extends Controller
         }
 
         $request->validate([
-            'logo' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'logo' => 'required|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
         ]);
 
         try {
-            // Eliminar logo anterior si existe
             if ($user->empresa->logo_path && Storage::exists($user->empresa->logo_path)) {
                 Storage::delete($user->empresa->logo_path);
             }
 
-            // Guardar nuevo logo
             $logoPath = $request->file('logo')->store('empresas/logos', 'public');
 
             $user->empresa->update([
@@ -273,9 +249,6 @@ class EmpresaController extends Controller
         }
     }
 
-    /**
-     * Subir constancia fiscal
-     */
     public function subirConstanciaFiscal(Request $request)
     {
         $user = Auth::user();
@@ -285,16 +258,14 @@ class EmpresaController extends Controller
         }
 
         $request->validate([
-            'constancia_fiscal' => 'required|mimes:pdf|max:5120', // 5MB
+            'constancia_fiscal' => 'required|mimes:pdf|max:5120',
         ]);
 
         try {
-            // Eliminar constancia anterior si existe
             if ($user->empresa->constancia_fiscal_path && Storage::exists($user->empresa->constancia_fiscal_path)) {
                 Storage::delete($user->empresa->constancia_fiscal_path);
             }
 
-            // Guardar nueva constancia
             $constanciaPath = $request->file('constancia_fiscal')->store('empresas/constancias', 'public');
 
             $user->empresa->update([
@@ -314,9 +285,6 @@ class EmpresaController extends Controller
         }
     }
 
-    /**
-     * Obtener estadísticas de la empresa
-     */
     public function estadisticas()
     {
         $user = Auth::user();
@@ -354,9 +322,6 @@ class EmpresaController extends Controller
         }
     }
 
-    /**
-     * Cambiar contraseña (compartido con PerfilController)
-     */
     public function cambiarPassword(Request $request)
     {
         $user = Auth::user();
@@ -385,5 +350,23 @@ class EmpresaController extends Controller
                 'error' => 'Error al cambiar la contraseña: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    // MÉTODO PRIVADO PARA SANITIZAR URLs
+    private function sanitizeUrl($url)
+    {
+        if (empty($url)) {
+            return null;
+        }
+        
+        $url = strip_tags($url);
+        
+        if (!preg_match('/^https?:\/\//i', $url)) {
+            $url = 'http://' . $url;
+        }
+        
+        $url = filter_var($url, FILTER_SANITIZE_URL);
+        
+        return $url;
     }
 }

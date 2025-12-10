@@ -11,14 +11,16 @@ use Illuminate\Support\Facades\Auth;
 
 class VacanteController extends Controller
 {
-    /**
-     * Mostrar formulario para crear vacante
-     */
+    public function __construct()
+    {
+        // Rate limiting para prevenir spam
+        $this->middleware('throttle:5,1')->only(['store', 'update']);
+    }
+    
     public function create()
     {
         $user = Auth::user();
         
-        // Verificar que el usuario sea empresa y esté aprobada
         if ($user->tipo !== 'empresa') {
             return redirect('/dashboard')->with('error', 'Solo las empresas pueden publicar vacantes.');
         }
@@ -35,69 +37,63 @@ class VacanteController extends Controller
         return view('vacantes.create', compact('user'));
     }
 
-    /**
-     * Guardar nueva vacante
-     */
     public function store(Request $request)
     {
         $user = Auth::user();
         
-        // Validaciones de seguridad
         if ($user->tipo !== 'empresa' || !$user->empresa || $user->empresa->estado !== 'aprobada') {
             return redirect('/dashboard')->with('error', 'No tienes permisos para publicar vacantes.');
         }
 
-        // Validar datos del formulario
+        // Validar y sanitizar
         $validated = $request->validate([
             'titulo' => 'required|string|max:255',
-            'descripcion' => 'required|string|min:50',
-            'requisitos' => 'required|string|min:30',
-            'beneficios' => 'nullable|string',
+            'descripcion' => 'required|string|min:50|max:5000',
+            'requisitos' => 'required|string|min:30|max:2000',
+            'beneficios' => 'nullable|string|max:1000',
             'tipo_contrato' => 'required|in:tiempo_completo,medio_tiempo,practicas,freelance,proyecto',
-            'salario_min' => 'nullable|numeric|min:0',
-            'salario_max' => 'nullable|numeric|min:0',
+            'salario_min' => 'nullable|numeric|min:0|max:9999999',
+            'salario_max' => 'nullable|numeric|min:0|max:9999999',
             'salario_mostrar' => 'boolean',
             'ubicacion' => 'required|string|max:255',
             'modalidad' => 'required|in:presencial,remoto,hibrido',
             'nivel_experiencia' => 'required|in:sin_experiencia,junior,mid,senior',
-            'vacantes_disponibles' => 'required|integer|min:1',
-            'fecha_limite' => 'required|date|after:today',
+            'vacantes_disponibles' => 'required|integer|min:1|max:100',
+            'fecha_limite' => 'required|date|after:today|before:+1 year',
         ]);
 
-        // Validación adicional de salarios
         if ($validated['salario_min'] && $validated['salario_max'] && 
             $validated['salario_min'] > $validated['salario_max']) {
             return back()->withErrors(['salario_min' => 'El salario mínimo no puede ser mayor al máximo.']);
         }
 
         try {
-            // Crear la vacante
+            // SANITIZAR antes de guardar
             $vacante = Vacante::create([
                 'empresa_id' => $user->empresa->id,
-                'titulo' => $validated['titulo'],
-                'descripcion' => $validated['descripcion'],
-                'requisitos' => $validated['requisitos'],
-                'beneficios' => $validated['beneficios'],
+                'titulo' => strip_tags($validated['titulo']),
+                'descripcion' => strip_tags($validated['descripcion']),
+                'requisitos' => strip_tags($validated['requisitos']),
+                'beneficios' => $validated['beneficios'] ? strip_tags($validated['beneficios']) : null,
                 'tipo_contrato' => $validated['tipo_contrato'],
                 'salario_min' => $validated['salario_min'],
                 'salario_max' => $validated['salario_max'],
                 'salario_mostrar' => $validated['salario_mostrar'] ?? true,
-                'ubicacion' => $validated['ubicacion'],
+                'ubicacion' => strip_tags($validated['ubicacion']),
                 'modalidad' => $validated['modalidad'],
                 'nivel_experiencia' => $validated['nivel_experiencia'],
                 'vacantes_disponibles' => $validated['vacantes_disponibles'],
                 'fecha_limite' => $validated['fecha_limite'],
-                'estado' => 'pendiente', // Requiere aprobación del admin
+                'estado' => 'pendiente',
                 'activa' => true,
             ]);
 
-            // ✅ NUEVO: NOTIFICAR A TODOS LOS ALUMNOS SOBRE NUEVA VACANTE
+            // Notificaciones (mantener igual)
             $alumnos = Usuario::where('tipo', 'alumno')->get();
             foreach ($alumnos as $alumno) {
                 Notificacion::crearVacanteNueva($alumno, $vacante);
             }
 
-            // ✅ NUEVO: NOTIFICAR A LOS ADMINS SOBRE NUEVA VACANTE PENDIENTE
             $admins = Usuario::where('tipo', 'admin')->get();
             foreach ($admins as $admin) {
                 Notificacion::nuevaVacanteCreada($vacante, $admin->id);
@@ -111,9 +107,6 @@ class VacanteController extends Controller
         }
     }
 
-    /**
-     * Listar vacantes de la empresa
-     */
     public function index()
     {
         $user = Auth::user();
@@ -129,24 +122,18 @@ class VacanteController extends Controller
         return view('vacantes.index', compact('user', 'vacantes'));
     }
 
-    /**
-     * Mostrar formulario para editar vacante
-     */
     public function edit(Vacante $vacante)
     {
         $user = Auth::user();
         
-        // Verificar permisos
         if ($user->tipo !== 'empresa' || !$user->empresa) {
             return redirect('/dashboard')->with('error', 'No tienes permisos para editar vacantes.');
         }
         
-        // Verificar que la vacante pertenece a la empresa del usuario
         if ($vacante->empresa_id !== $user->empresa->id) {
             return redirect('/dashboard')->with('error', 'No tienes permisos para editar esta vacante.');
         }
         
-        // Verificar que la vacante se puede editar (solo pendientes o aprobadas)
         if (!in_array($vacante->estado, ['pendiente', 'aprobada'])) {
             return redirect()->route('vacantes.index')
                 ->with('error', 'No puedes editar una vacante rechazada o cerrada.');
@@ -155,64 +142,56 @@ class VacanteController extends Controller
         return view('vacantes.edit', compact('user', 'vacante'));
     }
 
-    /**
-     * Actualizar vacante existente
-     */
     public function update(Request $request, Vacante $vacante)
     {
         $user = Auth::user();
         
-        // Verificar permisos
         if ($user->tipo !== 'empresa' || !$user->empresa || $vacante->empresa_id !== $user->empresa->id) {
             return redirect('/dashboard')->with('error', 'No tienes permisos para editar esta vacante.');
         }
         
-        // Verificar que la vacante se puede editar
         if (!in_array($vacante->estado, ['pendiente', 'aprobada'])) {
             return redirect()->route('vacantes.index')
                 ->with('error', 'No puedes editar una vacante rechazada o cerrada.');
         }
 
-        // Validar datos del formulario
         $validated = $request->validate([
             'titulo' => 'required|string|max:255',
-            'descripcion' => 'required|string|min:50',
-            'requisitos' => 'required|string|min:30',
-            'beneficios' => 'nullable|string',
+            'descripcion' => 'required|string|min:50|max:5000',
+            'requisitos' => 'required|string|min:30|max:2000',
+            'beneficios' => 'nullable|string|max:1000',
             'tipo_contrato' => 'required|in:tiempo_completo,medio_tiempo,practicas,freelance,proyecto',
-            'salario_min' => 'nullable|numeric|min:0',
-            'salario_max' => 'nullable|numeric|min:0',
+            'salario_min' => 'nullable|numeric|min:0|max:9999999',
+            'salario_max' => 'nullable|numeric|min:0|max:9999999',
             'salario_mostrar' => 'boolean',
             'ubicacion' => 'required|string|max:255',
             'modalidad' => 'required|in:presencial,remoto,hibrido',
             'nivel_experiencia' => 'required|in:sin_experiencia,junior,mid,senior',
-            'vacantes_disponibles' => 'required|integer|min:1',
-            'fecha_limite' => 'required|date|after:today',
+            'vacantes_disponibles' => 'required|integer|min:1|max:100',
+            'fecha_limite' => 'required|date|after:today|before:+1 year',
         ]);
 
-        // Validación adicional de salarios
         if ($validated['salario_min'] && $validated['salario_max'] && 
             $validated['salario_min'] > $validated['salario_max']) {
             return back()->withErrors(['salario_min' => 'El salario mínimo no puede ser mayor al máximo.']);
         }
 
         try {
-            // Actualizar la vacante
             $vacante->update([
-                'titulo' => $validated['titulo'],
-                'descripcion' => $validated['descripcion'],
-                'requisitos' => $validated['requisitos'],
-                'beneficios' => $validated['beneficios'],
+                'titulo' => strip_tags($validated['titulo']),
+                'descripcion' => strip_tags($validated['descripcion']),
+                'requisitos' => strip_tags($validated['requisitos']),
+                'beneficios' => $validated['beneficios'] ? strip_tags($validated['beneficios']) : null,
                 'tipo_contrato' => $validated['tipo_contrato'],
                 'salario_min' => $validated['salario_min'],
                 'salario_max' => $validated['salario_max'],
                 'salario_mostrar' => $validated['salario_mostrar'] ?? true,
-                'ubicacion' => $validated['ubicacion'],
+                'ubicacion' => strip_tags($validated['ubicacion']),
                 'modalidad' => $validated['modalidad'],
                 'nivel_experiencia' => $validated['nivel_experiencia'],
                 'vacantes_disponibles' => $validated['vacantes_disponibles'],
                 'fecha_limite' => $validated['fecha_limite'],
-                'estado' => 'pendiente', // Al editar, vuelve a estado pendiente para revisión
+                'estado' => 'pendiente',
             ]);
 
             return redirect()->route('vacantes.index')
@@ -223,20 +202,22 @@ class VacanteController extends Controller
         }
     }
 
-    /**
-     * Eliminar vacante
-     */
     public function destroy(Vacante $vacante)
     {
         $user = Auth::user();
         
-        // Verificar permisos
         if ($user->tipo !== 'empresa' || !$user->empresa || $vacante->empresa_id !== $user->empresa->id) {
             return redirect('/dashboard')->with('error', 'No tienes permisos para eliminar esta vacante.');
         }
 
+        // Validar si tiene postulaciones activas
+        if ($vacante->postulaciones()->whereIn('estado', ['pendiente', 'revision'])->exists()) {
+            return redirect()->route('vacantes.index')
+                ->with('error', 'No puedes eliminar esta vacante porque tiene postulaciones activas.');
+        }
+
         try {
-            $titulo = $vacante->titulo;
+            $titulo = htmlspecialchars($vacante->titulo, ENT_QUOTES, 'UTF-8');
             $vacante->delete();
 
             return redirect()->route('vacantes.index')

@@ -57,22 +57,31 @@ class ServicioSocialController extends Controller
             'actividades_principales' => 'required|string',
         ]);
 
-        // Crear solicitud de servicio social
+        // SANITIZAR CAMPOS DE TEXTO PARA PREVENIR XSS
+        $carrera = strip_tags($request->carrera);
+        $semestre = strip_tags($request->semestre);
+        $numero_control = strip_tags($request->numero_control);
+        $supervisor_empresa = $request->supervisor_empresa ? strip_tags($request->supervisor_empresa) : null;
+        $telefono_supervisor = $request->telefono_supervisor ? strip_tags($request->telefono_supervisor) : null;
+        $nombre_proyecto = strip_tags($request->nombre_proyecto);
+        $actividades_principales = strip_tags($request->actividades_principales);
+
+        // Crear solicitud de servicio social CON DATOS SANITIZADOS
         $servicioSocial = ServicioSocial::create([
             'postulacion_id' => $postulacion->id,
             'alumno_id' => Auth::id(),
             'empresa_id' => $postulacion->vacante->empresa_id,
             'vacante_id' => $postulacion->vacante_id,
-            'carrera' => $request->carrera,
-            'semestre' => $request->semestre,
-            'numero_control' => $request->numero_control,
+            'carrera' => $carrera,
+            'semestre' => $semestre,
+            'numero_control' => $numero_control,
             'fecha_inicio' => $request->fecha_inicio,
             'fecha_fin_estimada' => $request->fecha_fin_estimada,
-            'supervisor_empresa' => $request->supervisor_empresa,
+            'supervisor_empresa' => $supervisor_empresa,
             'email_supervisor' => $request->email_supervisor,
-            'telefono_supervisor' => $request->telefono_supervisor,
-            'nombre_proyecto' => $request->nombre_proyecto,
-            'actividades_principales' => $request->actividades_principales,
+            'telefono_supervisor' => $telefono_supervisor,
+            'nombre_proyecto' => $nombre_proyecto,
+            'actividades_principales' => $actividades_principales,
             'estado' => 'solicitado',
             'empresa_acepta' => false,
             'jefe_ss_aprueba' => false,
@@ -80,12 +89,16 @@ class ServicioSocialController extends Controller
         ]);
 
         // ✅ NOTIFICAR AL JEFE DE SERVICIO SOCIAL PRIMERO
-        $jefeSS = Usuario::where('email', 'servicio.social@itszn.edu.mx')->first();
+        // Usar variable de entorno para mayor flexibilidad
+        $emailJefeSS = env('JEFE_SERVICIO_SOCIAL_EMAIL', 'servicio.social@itszn.edu.mx');
+        $jefeSS = Usuario::where('email', $emailJefeSS)->first();
         if ($jefeSS) {
             $this->crearNotificacion(
                 $jefeSS->id,
                 'Nueva solicitud de Servicio Social',
-                "El alumno {$servicioSocial->alumno->name} ha solicitado Servicio Social en {$servicioSocial->empresa->nombre_empresa}. Revisa la solicitud.",
+                "El alumno " . htmlspecialchars($servicioSocial->alumno->name, ENT_QUOTES, 'UTF-8') . 
+                " ha solicitado Servicio Social en " . htmlspecialchars($servicioSocial->empresa->nombre_empresa, ENT_QUOTES, 'UTF-8') . 
+                ". Revisa la solicitud.",
                 'info',
                 route('admin.servicio-social.show', $servicioSocial->id)
             );
@@ -97,7 +110,9 @@ class ServicioSocialController extends Controller
             $this->crearNotificacion(
                 $user->id,
                 'Nueva solicitud de Servicio Social',
-                "El alumno {$servicioSocial->alumno->name} ha solicitado que su experiencia en {$servicioSocial->vacante->titulo} cuente como Servicio Social. Espera la aprobación del Departamento de Servicio Social.",
+                "El alumno " . htmlspecialchars($servicioSocial->alumno->name, ENT_QUOTES, 'UTF-8') . 
+                " ha solicitado que su experiencia en " . htmlspecialchars($servicioSocial->vacante->titulo, ENT_QUOTES, 'UTF-8') . 
+                " cuente como Servicio Social. Espera la aprobación del Departamento de Servicio Social.",
                 'info',
                 route('empresa.servicio-social.show', $servicioSocial->id)
             );
@@ -123,13 +138,17 @@ class ServicioSocialController extends Controller
         return view('servicio_social.show', compact('servicioSocial'));
     }
 
-    // MÉTODO PARA CREAR NOTIFICACIONES
+    // MÉTODO PARA CREAR NOTIFICACIONES (SEGURO CONTRA XSS)
     private function crearNotificacion($userId, $titulo, $mensaje, $tipo = 'info', $url = null)
     {
+        // Sanitizar títulos y mensajes
+        $tituloSanitizado = htmlspecialchars(strip_tags($titulo), ENT_QUOTES, 'UTF-8');
+        $mensajeSanitizado = htmlspecialchars(strip_tags($mensaje), ENT_QUOTES, 'UTF-8');
+        
         Notificacion::create([
             'user_id' => $userId,
-            'titulo' => $titulo,
-            'mensaje' => $mensaje,
+            'titulo' => $tituloSanitizado,
+            'mensaje' => $mensajeSanitizado,
             'tipo' => $tipo,
             'leida' => false,
             'url' => $url,
@@ -151,12 +170,15 @@ class ServicioSocialController extends Controller
         }
 
         // ✅ NOTIFICAR AL JEFE SS
-        $jefeSS = Usuario::where('email', 'servicio.social@itszn.edu.mx')->first();
+        $emailJefeSS = env('JEFE_SERVICIO_SOCIAL_EMAIL', 'servicio.social@itszn.edu.mx');
+        $jefeSS = Usuario::where('email', $emailJefeSS)->first();
         if ($jefeSS) {
             $this->crearNotificacion(
                 $jefeSS->id,
                 'Solicitud de Servicio Social Cancelada',
-                "El alumno {$servicioSocial->alumno->name} ha cancelado su solicitud de Servicio Social en {$servicioSocial->empresa->nombre_empresa}.",
+                "El alumno " . htmlspecialchars($servicioSocial->alumno->name, ENT_QUOTES, 'UTF-8') . 
+                " ha cancelado su solicitud de Servicio Social en " . 
+                htmlspecialchars($servicioSocial->empresa->nombre_empresa, ENT_QUOTES, 'UTF-8') . ".",
                 'warning',
                 route('admin.servicio-social.index')
             );
@@ -168,7 +190,8 @@ class ServicioSocialController extends Controller
             $this->crearNotificacion(
                 $user->id,
                 'Solicitud de Servicio Social Cancelada',
-                "El alumno {$servicioSocial->alumno->name} ha cancelado su solicitud de Servicio Social.",
+                "El alumno " . htmlspecialchars($servicioSocial->alumno->name, ENT_QUOTES, 'UTF-8') . 
+                " ha cancelado su solicitud de Servicio Social.",
                 'warning',
                 route('empresa.servicio-social.index')
             );
@@ -222,13 +245,17 @@ class ServicioSocialController extends Controller
             'evidencias' => 'nullable|string',
         ]);
 
-        // Crear registro de horas
+        // SANITIZAR CAMPOS DE TEXTO
+        $actividades_realizadas = strip_tags($request->actividades_realizadas);
+        $evidencias = $request->evidencias ? strip_tags($request->evidencias) : null;
+
+        // Crear registro de horas CON DATOS SANITIZADOS
         $registroHoras = new \App\Models\RegistroHorasSS([
             'servicio_social_id' => $servicioSocial->id,
             'fecha' => $request->fecha,
             'horas_trabajadas' => $request->horas_trabajadas,
-            'actividades_realizadas' => $request->actividades_realizadas,
-            'evidencias' => $request->evidencias,
+            'actividades_realizadas' => $actividades_realizadas,
+            'evidencias' => $evidencias,
             'aprobado_empresa' => false,
             'aprobado_jefe' => false,
         ]);

@@ -153,6 +153,8 @@
                                         <option value="servicios">Servicios</option>
                                         <option value="taller">Taller</option>
                                         <option value="consultoria">Consultoría</option>
+                                        <option value="consultoria">Automotriz</option>
+                                        <option value="consultoria">Industrial</option>
                                         <option value="otro">Otro</option>
                                     </select>
                                 </div>

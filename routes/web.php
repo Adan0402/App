@@ -13,6 +13,7 @@ use App\Http\Controllers\UsuarioController;
 use App\Http\Controllers\ServicioSocialController;
 use App\Http\Controllers\ServicioSocialEmpresaController;
 use App\Http\Controllers\RegistroHorasController;  
+use App\Http\Controllers\DashboardController;
 use App\Models\Usuario;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Auth;
@@ -26,29 +27,18 @@ Route::get('/', function () {
 // RUTAS PÚBLICAS DE AUTENTICACIÓN
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
 Route::post('/login', [LoginController::class, 'login']);
-Route::post('/logout', [LoginController::class, 'logout'])->name('logout');
+
 
 Route::get('/register', [RegisterController::class, 'showRegistrationForm'])->name('register');
 Route::post('/register', [RegisterController::class, 'register']);
 
 // RUTAS PROTEGIDAS (requieren autenticación)
 Route::middleware(['auth'])->group(function () {
+
+    Route::post('/logout', [LoginController::class, 'logout'])->name('logout');
     
     // 🔥 DASHBOARD PRINCIPAL
-    Route::get('/dashboard', function () {
-        $user = Auth::user();
-        $totalUsuarios = Usuario::count();
-        $alumnos = Usuario::where('tipo', 'alumno')->count();
-        $empresas = Usuario::where('tipo', 'empresa')->count();
-        
-        if ($user->tipo == 'admin') {
-            $empresasPendientesCount = \App\Models\Empresa::where('estado', 'pendiente')->count();
-            $vacantesPendientesCount = \App\Models\Vacante::where('estado', 'pendiente')->count();
-            return view('dashboard', compact('totalUsuarios', 'alumnos', 'empresas', 'user', 'empresasPendientesCount', 'vacantesPendientesCount'));
-        }
-        
-        return view('dashboard', compact('totalUsuarios', 'alumnos', 'empresas', 'user'));
-    })->name('dashboard');
+    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
     // 👥 RUTAS DE USUARIOS
     Route::get('/usuarios', function () {
@@ -76,21 +66,69 @@ Route::middleware(['auth'])->group(function () {
     });
 
     // 🛠️ RUTAS DE ADMINISTRACIÓN
-    Route::prefix('admin')->group(function () {
-        // Empresas
-        Route::get('/empresas-pendientes', [AdminController::class, 'empresasPendientes'])->name('admin.empresas.pendientes');
-        Route::post('/empresas/{empresa}/aprobar', [AdminController::class, 'aprobarEmpresa'])->name('admin.empresas.aprobar');
-        Route::post('/empresas/{empresa}/rechazar', [AdminController::class, 'rechazarEmpresa'])->name('admin.empresas.rechazar');
-        Route::get('/empresas', [AdminController::class, 'todasLasEmpresas'])->name('admin.empresas.todas');
-        
-        // Usuarios
-        Route::get('/usuarios', [AdminController::class, 'gestionarUsuarios'])->name('admin.usuarios');
-        
-        // Vacantes
-        Route::get('/vacantes-pendientes', [AdminController::class, 'vacantesPendientes'])->name('admin.vacantes.pendientes');
-        Route::post('/vacantes/{vacante}/aprobar', [AdminController::class, 'aprobarVacante'])->name('admin.vacantes.aprobar');
-        Route::post('/vacantes/{vacante}/rechazar', [AdminController::class, 'rechazarVacante'])->name('admin.vacantes.rechazar');
-    });
+Route::prefix('admin')->group(function () {
+    
+    // 📋 Dashboard Admin
+    Route::get('/dashboard', [AdminController::class, 'dashboard'])->name('admin.dashboard');
+    
+   // =============================================
+// 🏢 EMPRESAS - GESTIÓN COMPLETA
+// =============================================
+Route::get('/empresas', [AdminController::class, 'todasLasEmpresas'])->name('admin.empresas.todas');
+
+// CRUD Completo
+Route::get('/empresas/crear', [AdminController::class, 'crearEmpresa'])->name('admin.empresas.crear');
+Route::post('/empresas', [AdminController::class, 'guardarEmpresa'])->name('admin.empresas.guardar');
+
+// ✅ REORDENAR: Poner rutas específicas primero
+Route::get('/empresas/{empresa}/editar', [AdminController::class, 'editarEmpresa'])->name('admin.empresas.editar');
+Route::post('/empresas/{empresa}/aprobar', [AdminController::class, 'aprobarEmpresa'])->name('admin.empresas.aprobar');
+Route::post('/empresas/{empresa}/rechazar', [AdminController::class, 'rechazarEmpresa'])->name('admin.empresas.rechazar');
+
+// ✅ LUEGO las rutas con el mismo patrón, en este orden:
+Route::delete('/empresas/{empresa}', [AdminController::class, 'eliminarEmpresa'])->name('admin.empresas.eliminar');
+Route::put('/empresas/{empresa}', [AdminController::class, 'actualizarEmpresa'])->name('admin.empresas.actualizar');
+Route::get('/empresas/{empresa}', [AdminController::class, 'mostrarEmpresa'])->name('admin.empresas.mostrar');
+
+Route::get('/empresas-pendientes', [AdminController::class, 'empresasPendientes'])->name('admin.empresas.pendientes');
+    // =============================================
+    // 💼 VACANTES - GESTIÓN COMPLETA
+    // =============================================
+    Route::get('/vacantes', [AdminController::class, 'todasLasVacantes'])->name('admin.vacantes.todas');
+    
+    // CRUD Completo
+    Route::get('/vacantes/crear', [AdminController::class, 'crearVacante'])->name('admin.vacantes.crear');
+    Route::post('/vacantes', [AdminController::class, 'guardarVacante'])->name('admin.vacantes.guardar');
+    Route::get('/vacantes/{vacante}', [AdminController::class, 'mostrarVacante'])->name('admin.vacantes.mostrar');
+    Route::get('/vacantes/{vacante}/editar', [AdminController::class, 'editarVacante'])->name('admin.vacantes.editar');
+    Route::put('/vacantes/{vacante}', [AdminController::class, 'actualizarVacante'])->name('admin.vacantes.actualizar');
+    Route::delete('/vacantes/{vacante}', [AdminController::class, 'eliminarVacante'])->name('admin.vacantes.eliminar');
+    
+    // Aprobación/Rechazo
+    Route::get('/vacantes-pendientes', [AdminController::class, 'vacantesPendientes'])->name('admin.vacantes.pendientes');
+    Route::post('/vacantes/{vacante}/aprobar', [AdminController::class, 'aprobarVacante'])->name('admin.vacantes.aprobar');
+    Route::post('/vacantes/{vacante}/rechazar', [AdminController::class, 'rechazarVacante'])->name('admin.vacantes.rechazar');
+    
+    // =============================================
+    // 👥 USUARIOS
+    // =============================================
+    Route::get('/usuarios', [AdminController::class, 'gestionarUsuarios'])->name('admin.usuarios');
+    
+    // =============================================
+    // 🎓 SOPORTE TÉCNICO
+    // =============================================
+    Route::get('/soporte-tecnico', function () {
+        return view('admin.soporte_tecnico');
+    })->name('admin.soporte-tecnico');
+    
+    // =============================================
+    // 📊 SERVICIO SOCIAL
+    // =============================================
+    Route::get('/servicio-social/login', [AdminController::class, 'servicioSocialLogin'])
+        ->name('admin.servicio-social.login');
+    Route::post('/servicio-social/verify', [AdminController::class, 'servicioSocialVerify'])
+        ->name('admin.servicio-social.verify');
+});
 
     // 👨‍🎓 RUTAS PARA ALUMNOS
     Route::prefix('alumno')->group(function () {
@@ -243,5 +281,4 @@ Route::prefix('admin')->group(function () {
         return view('admin.soporte_tecnico');
     })->name('admin.soporte-tecnico');
 });
-
 }); // ← CIERRE DEL GRUPO AUTH
